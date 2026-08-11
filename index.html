@@ -1,0 +1,1900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Belgium Earth Observation Statistics</title>
+
+<script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/pmtiles@3.0.6/dist/pmtiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    --bg:        #0d1117;
+    --panel:     #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #7d8590;
+    --accent:    #58a6ff;
+    --measured:  #3fb950;
+    --imputed:   #d29922;
+    --missing:   #f85149;
+    --panel-w:   320px;
+    --header-h:  52px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    height: var(--header-h);
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 12px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+    .proto-warning {
+      background: #5a1a1a;
+      border-bottom: 1px solid #f8514988;
+      color: #f85149;
+      text-align: center;
+      padding: 6px 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      flex-shrink: 0;
+    }
+  .header-icon {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #1f6feb, #58a6ff);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+
+  header h1 { font-size: 14px; font-weight: 600; }
+  header .subtitle { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  .header-spacer { flex: 1; }
+
+  .header-badge {
+    background: #1f6feb22;
+    border: 1px solid #1f6feb55;
+    color: var(--accent);
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: monospace;
+  }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  .sidebar {
+    width: var(--panel-w);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section { padding: 16px; border-bottom: 1px solid var(--border); }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  /* ── LAND COVER ─────────────────────────────────────────────────────────── */
+  .lc-groups { display: flex; flex-direction: column; gap: 2px; }
+
+  .lc-level-header {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 8px; cursor: pointer; border-radius: 6px;
+    border: 1px solid transparent; transition: all 0.15s; user-select: none;
+  }
+  .lc-level-header:hover { background: #ffffff06; border-color: var(--border); }
+  .lc-level-header.has-active { border-color: #1f6feb33; background: #1f6feb08; }
+  .lc-level-label { font-size: 10px; font-weight: 600; color: var(--muted); flex: 1; letter-spacing: 0.05em; text-transform: uppercase; }
+  .lc-level-header.has-active .lc-level-label { color: var(--accent); }
+  .lc-level-chevron { font-size: 9px; color: var(--muted); transition: transform 0.2s; }
+  .lc-level-header.open .lc-level-chevron { transform: rotate(0deg); }
+  .lc-level-header:not(.open) .lc-level-chevron { transform: rotate(-90deg); }
+
+  .lc-level-items {
+    display: flex; flex-direction: column; gap: 1px;
+    padding-left: 8px; overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  }
+  .lc-level-items.collapsed { max-height: 0 !important; opacity: 0; padding-top: 0; padding-bottom: 0; }
+
+  .lc-class-btn {
+    background: transparent; border: 1px solid transparent;
+    color: var(--muted); padding: 5px 10px; border-radius: 5px;
+    cursor: pointer; text-align: left; font-family: inherit;
+    font-size: 11px; display: flex; align-items: center;
+    gap: 8px; transition: all 0.15s; width: 100%;
+  }
+  .lc-class-btn:hover { background: #ffffff08; color: var(--text); border-color: var(--border); }
+  .lc-class-btn.active { background: #1f6feb18; border-color: #1f6feb55; color: var(--accent); }
+  .lc-class-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  /* Coverage bar land cover */
+  .lc-coverage-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+
+  /* ── END STYLES ─────────────────────────────────────────────────────────── */
+  .indicator-groups { display: flex; flex-direction: column; gap: 2px; }
+
+  .group-header {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 8px; cursor: pointer; border-radius: 6px;
+    border: 1px solid transparent; transition: all 0.15s; user-select: none;
+  }
+  .group-header:hover { background: #ffffff06; border-color: var(--border); }
+  .group-header.has-active { border-color: #1f6feb33; background: #1f6feb08; }
+
+  .group-icon { font-size: 12px; flex-shrink: 0; }
+  .group-label { font-size: 10px; font-weight: 600; color: var(--muted); flex: 1; letter-spacing: 0.05em; text-transform: uppercase; }
+  .group-header.has-active .group-label { color: var(--accent); }
+
+  .group-chevron { font-size: 9px; color: var(--muted); transition: transform 0.2s; display: inline-block; }
+  .group-header.open .group-chevron { transform: rotate(0deg); }
+  .group-header:not(.open) .group-chevron { transform: rotate(-90deg); }
+
+  .group-items {
+    display: flex; flex-direction: column; gap: 1px;
+    padding-left: 8px; overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  }
+  .group-items.collapsed { max-height: 0 !important; opacity: 0; padding-top: 0; padding-bottom: 0; }
+
+  .indicator-btn {
+    background: transparent; border: 1px solid transparent;
+    color: var(--muted); padding: 6px 10px; border-radius: 5px;
+    cursor: pointer; text-align: left; font-family: inherit;
+    font-size: 12px; display: flex; align-items: center;
+    gap: 8px; transition: all 0.15s; width: 100%;
+  }
+  .indicator-btn:hover { background: #ffffff08; color: var(--text); border-color: var(--border); }
+  .indicator-btn.active { background: #1f6feb18; border-color: #1f6feb55; color: var(--accent); }
+
+  .indicator-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .indicator-meta { font-size: 10px; color: var(--muted); margin-left: auto; font-family: monospace; }
+
+  .indicator-coming {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 10px; font-size: 11px; color: #ffffff20; pointer-events: none;
+  }
+  .coming-dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff15; flex-shrink: 0; }
+  .badge-soon {
+    margin-left: auto; font-size: 9px; background: #ffffff0a;
+    color: #ffffff25; padding: 1px 5px; border-radius: 3px; letter-spacing: 0.05em;
+  }
+
+    .method-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      border: 1px solid #1f6feb55;
+      background: #1f6feb12;
+      text-decoration: none;
+      margin-bottom: 12px;
+      transition: all 0.15s;
+    }
+    .method-btn:hover { border-color: var(--accent); background: #1f6feb22; }
+    .method-icon { font-size: 18px; flex-shrink: 0; }
+    .method-title { font-size: 12px; font-weight: 600; color: var(--accent); }
+    .method-desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .method-arrow { margin-left: auto; color: var(--accent); font-size: 14px; flex-shrink: 0; }
+
+  .period-display {
+    font-family: monospace;
+    font-size: 20px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    letter-spacing: -0.02em;
+  }
+
+  .period-display span { color: var(--muted); font-size: 13px; font-weight: 400; }
+
+  input[type="range"] { width: 100%; -webkit-appearance: none; background: transparent; cursor: pointer; }
+  input[type="range"]::-webkit-slider-track { background: var(--border); height: 3px; border-radius: 2px; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); margin-top: -5.5px; transition: transform 0.1s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  .period-nav { display: flex; gap: 6px; margin-top: 10px; }
+
+  .nav-btn {
+    flex: 1; background: #ffffff08; border: 1px solid var(--border);
+    color: var(--muted); padding: 6px; border-radius: 5px;
+    cursor: pointer; font-size: 12px; transition: all 0.15s;
+  }
+  .nav-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  .coverage-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .coverage-row { display: flex; align-items: center; gap: 8px; }
+  .coverage-label { width: 70px; font-size: 11px; color: var(--muted); }
+  .coverage-bar-wrap { flex: 1; background: var(--border); height: 4px; border-radius: 2px; overflow: hidden; }
+  .coverage-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+  .coverage-pct { font-family: monospace; font-size: 11px; width: 35px; text-align: right; }
+
+  .legend-gradient { height: 10px; border-radius: 3px; margin-bottom: 6px; }
+  .legend-labels { display: flex; justify-content: space-between; font-family: monospace; font-size: 10px; color: var(--muted); }
+
+  .option-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+
+  .toggle {
+    width: 32px; height: 18px; background: var(--border); border-radius: 9px;
+    position: relative; cursor: pointer; border: none; transition: background 0.2s; flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: ''; position: absolute; width: 12px; height: 12px;
+    background: white; border-radius: 50%; top: 3px; left: 3px; transition: left 0.2s;
+  }
+  .toggle.on::after { left: 17px; }
+  .option-label { color: var(--text); font-size: 12px; }
+
+  /* ── DOWNLOAD ── */
+  .dl-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .dl-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #ffffff06;
+    text-decoration: none;
+    transition: all 0.15s;
+    gap: 8px;
+  }
+  .dl-item:hover { border-color: var(--accent); background: #58a6ff10; }
+
+  .dl-item-left { display: flex; align-items: center; gap: 8px; }
+  .dl-icon { font-size: 14px; flex-shrink: 0; }
+  .dl-label { font-size: 12px; color: var(--text); font-weight: 500; }
+  .dl-desc  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .dl-size  { font-family: monospace; font-size: 10px; color: var(--muted); flex-shrink: 0; }
+
+  #map {
+    flex: 1;
+    position: relative;
+    height: 100%;
+    min-height: 0;
+  }
+  .maplibregl-ctrl-bottom-right { bottom: 28px; }
+
+  /* ── LEVEL SWITCHER (floating) ── */
+  .level-switcher {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px #00000040;
+  }
+
+  .level-btn {
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    padding: 7px 14px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .level-btn:last-child { border-right: none; }
+  .level-btn:hover { background: #ffffff08; color: var(--text); }
+  .level-btn.active { background: #1f6feb22; color: var(--accent); }
+
+  /* ── DETAIL PANEL ── */
+  .detail-panel {
+    position: absolute; bottom: 0; right: 0;
+    width: 300px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-radius: 8px 0 0 0;
+    padding: 16px;
+    z-index: 5;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+  }
+  .detail-panel.visible { transform: translateY(0); }
+
+  .detail-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .detail-sector-id { font-family: monospace; font-size: 11px; color: var(--muted); margin-bottom: 2px; line-height: 1.6; }
+  .detail-value { font-family: monospace; font-size: 24px; font-weight: 500; line-height: 1; }
+  .detail-value-unit { font-size: 13px; color: var(--muted); margin-left: 4px; }
+
+  .close-btn {
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1;
+  }
+  .close-btn:hover { color: var(--text); background: var(--border); }
+
+  .flag-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 12px; font-size: 10px;
+    font-weight: 500; margin-top: 6px; margin-bottom: 12px;
+  }
+  .flag-badge.measured           { background: #3fb95018; color: var(--measured); border: 1px solid #3fb95040; }
+  .flag-badge.imputed_temporal   { background: #d2992218; color: var(--imputed);  border: 1px solid #d2992240; }
+  .flag-badge.missing            { background: #f8514918; color: var(--missing);  border: 1px solid #f8514940; }
+  .flag-badge.mixed              { background: #d2992218; color: var(--imputed);  border: 1px solid #d2992240; }
+  .flag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .detail-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat-box { background: #ffffff05; border: 1px solid var(--border); border-radius: 5px; padding: 8px; }
+  .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .stat-val { font-family: monospace; font-size: 13px; color: var(--text); font-weight: 500; }
+
+  #temporal-chart-wrap { position: relative; height: 100px; }
+
+  /* ── LOADING ── */
+  #loading {
+    position: absolute; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100; gap: 12px; transition: opacity 0.4s;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+
+  .loader-ring {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading-text { font-size: 12px; color: var(--muted); font-family: monospace; }
+
+  /* ── STATUS BAR ── */
+  .statusbar {
+    height: 22px; background: var(--panel); border-top: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 12px; gap: 16px;
+    font-family: monospace; font-size: 10px; color: var(--muted); flex-shrink: 0;
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--measured); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .status-item { display: flex; align-items: center; gap: 5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-icon">🛰️</div>
+  <h1>Belgium Earth Observation Statistics</h1>
+  <!-- <span class="subtitle">— by STATBEL</span> -->
+  <div class="header-spacer"></div>
+  <div class="header-badge"> Copernicus · openEO · CDSE</div>
+</header>
+
+<div class="proto-warning">
+  ⚠️ This is a prototype — data are not yet validated
+</div>
+
+<div class="main">
+  <aside class="sidebar">
+
+    <div class="section">
+      <div class="section-label">🛰️ Earth Observation</div>
+      <div class="indicator-groups" id="indicator-groups"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">🗺️ Corine Land Cover</div>
+      <div class="lc-groups" id="lc-groups"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Period</div>
+      <div class="period-display" id="period-display">— <span>loading…</span></div>
+      <input type="range" id="period-slider" min="0" max="0" value="0">
+      <div class="period-nav">
+        <button class="nav-btn" id="prev-btn">◀ Prev</button>
+        <button class="nav-btn" id="next-btn">Next ▶</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Coverage</div>
+      <!-- EO coverage bars -->
+      <div id="coverage-section-eo">
+        <div class="coverage-bars">
+          <div class="coverage-row">
+            <span class="coverage-label" style="color:var(--measured)">Measured</span>
+            <div class="coverage-bar-wrap"><div class="coverage-bar-fill" id="bar-measured" style="background:var(--measured);width:0%"></div></div>
+            <span class="coverage-pct" id="pct-measured" style="color:var(--measured)">—</span>
+          </div>
+          <div class="coverage-row">
+            <span class="coverage-label" id="coverage-label-imputed" style="color:var(--imputed)">Imputed</span>
+            <div class="coverage-bar-wrap"><div class="coverage-bar-fill" id="bar-imputed" style="background:var(--imputed);width:0%"></div></div>
+            <span class="coverage-pct" id="pct-imputed" style="color:var(--imputed)">—</span>
+          </div>
+          <div class="coverage-row">
+            <span class="coverage-label" style="color:var(--missing)">Missing</span>
+            <div class="coverage-bar-wrap"><div class="coverage-bar-fill" id="bar-missing" style="background:var(--missing);width:0%"></div></div>
+            <span class="coverage-pct" id="pct-missing" style="color:var(--missing)">—</span>
+          </div>
+        </div>
+      </div>
+      <!-- LC coverage bar -->
+      <div id="coverage-section-lc" style="display:none">
+        <div class="lc-coverage-label" id="lc-coverage-label">Class coverage</div>
+        <div class="coverage-bars">
+          <div class="coverage-row">
+            <span class="coverage-label" style="color:var(--accent)">Avg. %</span>
+            <div class="coverage-bar-wrap"><div class="coverage-bar-fill" id="bar-lc" style="background:var(--accent);width:0%"></div></div>
+            <span class="coverage-pct" id="pct-lc" style="color:var(--accent)">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Legend</div>
+      <div class="legend-gradient" id="legend-gradient"></div>
+      <div class="legend-labels" id="legend-labels"><span>—</span><span>—</span><span>—</span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Display</div>
+      <div class="option-row">
+        <button class="toggle on" id="toggle-imputed"></button>
+        <span class="option-label">Show imputed values</span>
+      </div>
+    <div class="option-row">
+      <button class="toggle on" id="toggle-labels"></button>
+      <span class="option-label">Show labels</span>
+    </div>
+    <div class="option-row">
+      <button class="toggle on" id="toggle-transparency"></button>
+      <span class="option-label">Transparency</span>
+    </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Download</div>
+
+      <!-- Methodology — mis en avant -->
+      <a class="method-btn" id="method-btn" href="/docs/ndvi_methodology_v1.0.pdf" target="_blank">
+        <span class="method-icon">📋</span>
+        <div>
+          <div class="method-title">Methodology &amp; Citation</div>
+          <div class="method-desc">Required for academic use · PDF</div>
+        </div>
+        <span class="method-arrow">↗</span>
+      </a>
+
+      <!-- Data files -->
+      <div style="margin:8px 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Data files</div>
+      <div class="dl-list" id="dl-list">
+        <!-- populated by JS -->
+      </div>
+    </div>
+
+  </aside>
+
+  <div style="position:relative;flex:1;height:100%;min-height:0;">
+    <div id="map"></div>
+
+    <!-- Level switcher -->
+    <div class="level-switcher" id="level-switcher">
+      <button class="level-btn active" data-level="sector">Sector</button>
+      <button class="level-btn" data-level="commune">Municipality</button>
+      <button class="level-btn" data-level="arrondissement">Arrond.</button>
+      <button class="level-btn" data-level="province">Province</button>
+      <button class="level-btn" data-level="region">Region</button>
+    </div>
+
+    <div id="loading">
+      <div class="loader-ring"></div>
+      <div id="loading-text">Initializing…</div>
+    </div>
+
+    <div class="detail-panel" id="detail-panel">
+      <div class="detail-header">
+        <div>
+          <div class="detail-sector-id" id="detail-sector-id">—</div>
+          <div>
+            <span class="detail-value" id="detail-value">—</span>
+            <span class="detail-value-unit" id="detail-unit"></span>
+          </div>
+          <div class="flag-badge measured" id="detail-flag">
+            <span class="flag-dot"></span>
+            <span id="detail-flag-text">measured</span>
+          </div>
+        </div>
+        <button class="close-btn" id="close-detail">✕</button>
+      </div>
+
+      <div class="detail-stats">
+        <div class="stat-box"><div class="stat-label">Median</div><div class="stat-val" id="detail-median">—</div></div>
+        <div class="stat-box"><div class="stat-label">Std dev</div><div class="stat-val" id="detail-std">—</div></div>
+        <div class="stat-box"><div class="stat-label" id="detail-pixels-label">Area measured</div><div class="stat-val" id="detail-pixels">—</div></div>
+      </div>
+
+      <div class="section-label" style="margin-bottom:8px">Temporal series</div>
+      <div id="temporal-chart-wrap"><canvas id="temporal-chart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <div class="status-item"><div class="status-dot"></div><span id="status-text">Loading…</span></div>
+  <div class="status-item">🛰 <span id="status-satellite">—</span></div>
+  <div class="status-item">📐 <span id="status-resolution">—</span></div>
+  <div class="status-item" id="status-sectors">—</div>
+</div>
+
+<script type="module">
+import * as arrow from 'https://cdn.jsdelivr.net/npm/apache-arrow@14.0.2/+esm';
+import init, { readParquet } from 'https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+await init();
+
+// ── PMTILES ───────────────────────────────────────────────────────────────────
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', protocol.tile);
+
+// ── LEVEL CONFIG ──────────────────────────────────────────────────────────────
+const LEVEL_CONFIG = {
+  sector:         { pmtiles: 'sectors',         sourceLayer: 'sectors',         idProp: 'CS01012020' },
+  commune:        { pmtiles: 'communes',         sourceLayer: 'communes',        idProp: 'CNIS5_2020' },
+  arrondissement: { pmtiles: 'arrondissement',   sourceLayer: 'arrondissement',  idProp: 'NUTS3'      },
+  province:       { pmtiles: 'provinces',        sourceLayer: 'provinces',       idProp: 'C_PROVI'    },
+  region:         { pmtiles: 'regions',          sourceLayer: 'regions',         idProp: 'C_REGIO'    },
+};
+
+// ── INDICATOR CONFIG ──────────────────────────────────────────────────────────
+const INDICATOR_CONFIG = {
+  ndvi: {
+    label: 'Vegetation Index (NDVI)',
+    description: 'Normalized Difference Vegetation Index',
+    unit: '',
+    color: '#3fb950',
+    vmin: 0.1, vmax: 0.8,
+    decimals: 3,
+    gradient: ['#d73027','#fc8d59','#fee08b','#d9ef8b','#91cf60','#1a9850'],
+    satellite: 'Sentinel-2 L2A',
+    resolution: '20m',
+  },
+    ndwi: {
+      label: 'Water Index (NDWI)',
+      description: 'Normalized Difference Water Index — McFeeters',
+      unit: '',
+      decimals: 3,
+      color: '#0ea5e9',
+      vmin: -1,
+      vmax: 0.3,
+      gradient: ['#d4a017','#f5f5dc','#a8d5a2','#4fc3f7','#0288d1','#01579b'],
+      satellite: 'Sentinel-2 L2A',
+      resolution: '20m',
+    },
+    ndmi: {
+      label: 'Moisture Index (NDMI)',
+      description: 'Normalized Difference Moisture Index — vegetation water content',
+      unit: '',
+      decimals: 3,
+      color: '#06b6d4',
+      vmin: -0.5,
+      vmax: 0.5,
+      gradient: ['#7c2d12','#ea580c','#fef08a','#86efac','#0ea5e9','#1e3a8a'],
+      satellite: 'Sentinel-2 L2A',
+      resolution: '20m',
+    },
+    ndbi: {
+      label: 'Built-up Index (NDBI)',
+      description: 'Normalized Difference Built-up Index — impervious surfaces',
+      unit: '',
+      decimals: 3,
+      color: '#94a3b8',
+      satellite: 'Sentinel-2 L2A',
+      resolution: '20m',
+      vmin: -0.5,
+      vmax: 0.5,
+      gradient: ['#166534','#4ade80','#fef9c3','#f97316','#7f1d1d','#1c1917'],
+    },
+    so2: {
+      label: 'Sulfur Dioxide (SO2)',
+      description: 'Tropospheric SO2 column density — industrial emissions',
+      unit: 'µmol/m²',
+      decimals: 5,
+      color: '#eab308',
+      vmin: -0.001,
+      vmax: 0.002,
+      gradient: ['#f0fdf4','#bbf7d0','#86efac','#fef08a','#fbbf24','#92400e'],
+      satellite: 'Sentinel-5P TROPOMI',
+      resolution: '5.5km',
+    },
+    ch4: {
+      label: 'Methane (CH4)',
+      description: 'CH4 column density — agriculture, landfills, mines',
+      unit: 'ppb',
+      decimals: 1,
+      color: '#84cc16',
+      satellite: 'Sentinel-5P TROPOMI',
+      resolution: '5.5km',
+      vmin: 1800,
+      vmax: 1950,
+      gradient: ['#f0fdf4','#bbf7d0','#4ade80','#facc15','#f97316','#7f1d1d'],
+    },
+    aer_ai: {
+      label: 'Aerosol Index (AER_AI)',
+      description: 'UV Aerosol Index 340/380nm — absorbing particles proxy',
+      unit: '',
+      decimals: 3,
+      color: '#f59e0b',
+      satellite: 'Sentinel-5P TROPOMI',
+      resolution: '5.5km',
+      vmin: -1,
+      vmax: 1,
+      gradient: ['#e0f2fe','#7dd3fc','#fef9c3','#fde68a','#f97316','#7c2d12'],
+    },
+    lst_day: {
+      label: 'Land Surface Temp. — Day (LST)',
+      description: 'Daytime land surface temperature',
+      unit: '°C',
+      decimals: 1,
+      vmin: -5,
+      vmax: 40,
+      gradient: ['#313695','#74add1','#e0f3f8','#fee090','#f46d43','#a50026'],
+      color: '#f97316',  // orange
+      satellite: 'Sentinel-3 SLSTR L2',  
+      resolution: '1km',
+    },
+    lst_night: {
+      label: 'Land Surface Temp. — Night (LST)',
+      description: 'Nighttime land surface temperature',
+      unit: '°C',
+      decimals: 1,
+      vmin: -10,
+      vmax: 25,
+      gradient: ['#0d1b2a','#1b4f72','#2e86c1','#85c1e9','#d4e6f1','#fdfefe'],
+      color: '#6366f1',  // indigo
+      satellite: 'Sentinel-3 SLSTR L2',  
+      resolution: '1km',
+    },
+    no2: {
+      label: 'Nitrogen Dioxide (NO2)',
+      unit: 'µmol/m²',
+      decimals: 5,
+      vmin: 0,
+      vmax: 0.0002,  // à ajuster après premiers résultats
+      gradient: ['#ffff00','#ffcc00','#ff9900','#cc66cc','#9933cc','#660099'],
+      color: '#9333ea',  // mauve
+      satellite: 'Sentinel-5P TROPOMI',
+      resolution: '5.5km',
+    }
+};
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let manifest         = null;
+let manifestLC       = null;
+let manifestERA5     = null;
+let currentMode      = 'eo';        // 'eo' or 'landcover'
+let currentIndicator = 'ndvi';
+let currentLCClass   = null;
+let currentLCYear    = 2018;
+let currentLevel     = 'sector';
+let currentPeriodIdx = 0;
+let currentData      = {};
+let allData          = {};
+let showImputed      = true;
+let temporalChart    = null;
+let map              = null;
+let geoAreas = null;
+geoAreas = await fetch('https://pub-1c6ab8c96281402c942ebed10f6fd665.r2.dev/dashboard/data/geo_areas.json').then(r => r.json());
+
+// ── LOAD MANIFESTS ────────────────────────────────────────────────────────────
+setLoading('Loading manifest…');
+manifest = await fetch('https://pub-1c6ab8c96281402c942ebed10f6fd665.r2.dev/dashboard/data/manifest.json').then(r => r.json());
+try {
+  manifestLC = await fetch('https://pub-1c6ab8c96281402c942ebed10f6fd665.r2.dev/dashboard/data/manifest_landcover.json').then(r => r.json());
+} catch(e) {
+  console.warn('Land Cover manifest not found:', e);
+}
+const indicators = Object.keys(manifest);
+
+// ── INDICATOR GROUPS CONFIG ───────────────────────────────────────────────────
+const INDICATOR_GROUPS = [
+  {
+    id: 'vegetation', icon: '🌿', label: 'Vegetation & Land Cover',
+    indicators: ['ndvi'],
+    coming_soon: ['EVI', 'SAVI', 'OGVI'],
+  },
+  {
+    id: 'water', icon: '💧', label: 'Water & Moisture',
+    indicators: ['ndwi', 'ndmi'],
+    coming_soon: ['MNDWI', 'Soil moisture'],
+  },
+  {
+    id: 'urban', icon: '🏙️', label: 'Urban & Built-up',
+    indicators: ['ndbi'],
+    coming_soon: ['BSI', 'ISA', 'TCD'],
+  },
+  {
+    id: 'temperature', icon: '🌡️', label: 'Temperature & Heat',
+    indicators: ['lst_day', 'lst_night'],
+    coming_soon: ['UTCI', 'ERA5 T2m'],
+  },
+  {
+    id: 'airquality', icon: '🌫️', label: 'Air Quality',
+    indicators: ['no2', 'so2', 'aer_ai'],
+    coming_soon: ['CO', 'O3', 'HCHO'],
+  },
+  {
+    id: 'climate', icon: '☁️', label: 'Climate & Atmosphere',
+    indicators: ['ch4'],
+    coming_soon: ['ERA5 Precip.', 'ERA5 Humidity', 'ERA5 Wind'],
+  },
+];
+
+// ── BUILD INDICATOR GROUPS ────────────────────────────────────────────────────
+const indicatorGroupsEl = document.getElementById('indicator-groups');
+
+INDICATOR_GROUPS.forEach(group => {
+  // Filtrer les indicateurs disponibles dans le manifest
+  const available = group.indicators.filter(ind => manifest[ind]);
+
+  // Conteneur du groupe
+  const groupEl = document.createElement('div');
+  groupEl.className = 'indicator-group';
+  groupEl.dataset.group = group.id;
+
+  // Header cliquable
+  const header = document.createElement('div');
+  header.className = 'group-header';
+  header.innerHTML = `
+    <span class="group-icon">${group.icon}</span>
+    <span class="group-label">${group.label}</span>
+    <span class="group-chevron">▾</span>
+  `;
+
+  // Items container
+  const items = document.createElement('div');
+  items.className = 'group-items collapsed';
+
+  // Indicateurs disponibles
+  available.forEach(ind => {
+    const cfg = INDICATOR_CONFIG[ind] || { label: ind, color: '#58a6ff' };
+    const periods = manifest[ind]['sector'] || [];
+    const btn = document.createElement('button');
+    btn.className = 'indicator-btn';
+    btn.dataset.ind = ind;
+    btn.innerHTML = `
+      <span class="indicator-dot" style="background:${cfg.color}"></span>
+      <span>${cfg.label}</span>
+      <span class="indicator-meta">${periods.length}mo</span>
+    `;
+    btn.addEventListener('click', () => selectIndicator(ind));
+    items.appendChild(btn);
+  });
+
+  // Coming soon
+  group.coming_soon.forEach(label => {
+    const div = document.createElement('div');
+    div.className = 'indicator-coming';
+    div.innerHTML = `
+      <span class="coming-dot"></span>
+      <span>${label}</span>
+      <span class="badge-soon">soon</span>
+    `;
+    items.appendChild(div);
+  });
+
+  // Toggle collapse/expand
+  header.addEventListener('click', () => {
+    const isOpen = header.classList.contains('open');
+    if (isOpen) {
+      header.classList.remove('open');
+      items.style.maxHeight = items.scrollHeight + 'px';
+      requestAnimationFrame(() => {
+        items.style.maxHeight = '0';
+        items.classList.add('collapsed');
+      });
+    } else {
+      header.classList.add('open');
+      items.classList.remove('collapsed');
+      items.style.maxHeight = items.scrollHeight + 'px';
+      setTimeout(() => { items.style.maxHeight = 'none'; }, 250);
+    }
+  });
+
+  groupEl.appendChild(header);
+  groupEl.appendChild(items);
+  indicatorGroupsEl.appendChild(groupEl);
+});
+
+// ── BUILD LAND COVER GROUPS ───────────────────────────────────────────────────
+const CLC_COLORS = {
+  "111":"#e6004d","112":"#ff0000","121":"#cc4df2","122":"#cc0000","123":"#e6cccc",
+  "124":"#e6cce6","131":"#a600cc","132":"#a64dcc","133":"#ff4dff","141":"#ffa6ff",
+  "142":"#ffe6ff","211":"#ffffa8","212":"#ffff00","213":"#e6e600","221":"#e68000",
+  "222":"#f2a64d","223":"#e6a600","231":"#e8fa8c","241":"#e6e64d","242":"#ffe6a6",
+  "243":"#ffe64d","244":"#e6cc4d","311":"#80ff00","312":"#00a600","313":"#4dff00",
+  "321":"#ccf24d","322":"#a6ff80","323":"#a6e64d","324":"#a6f200","331":"#e6e6e6",
+  "332":"#cccccc","333":"#ccffa6","334":"#000000","335":"#a6e6cc","411":"#a6a6ff",
+  "412":"#4d4dff","421":"#ccccff","422":"#e6e6ff","423":"#a6a6e6","511":"#00ccf2",
+  "512":"#80f2e6","521":"#00ffa6","522":"#cce6ff","523":"#e6f2ff",
+  // Level 2
+  "11":"#e6004d","12":"#cc4df2","13":"#cc0000","14":"#e6cccc",
+  "21":"#ffffa8","22":"#e68000","23":"#e8fa8c","24":"#ffe6a6",
+  "31":"#80ff00","32":"#ccf24d","33":"#e6e6e6",
+  "41":"#a6a6ff","42":"#ccccff","51":"#80f2e6","52":"#cce6ff",
+  // Level 1
+  "1":"#e6004d","2":"#ffffa8","3":"#80ff00","4":"#a6a6ff","5":"#80f2e6",
+};
+
+const LC_LEVELS = [
+  { id: 'lc1', label: 'Level 1 — Major categories', level: 1,
+    classes: [
+      { code: "1", label: "Artificial surfaces" },
+      { code: "2", label: "Agricultural areas" },
+      { code: "3", label: "Forest & semi-natural" },
+      { code: "4", label: "Wetlands" },
+      { code: "5", label: "Water bodies" },
+    ]
+  },
+  { id: 'lc2', label: 'Level 2 — Sub-categories', level: 2,
+    classes: [
+      { code: "11", label: "Urban fabric" },
+      { code: "12", label: "Industrial & transport" },
+      { code: "13", label: "Mine, dump & construction" },
+      { code: "14", label: "Green urban areas" },
+      { code: "21", label: "Arable land" },
+      { code: "22", label: "Permanent crops" },
+      { code: "23", label: "Pastures" },
+      { code: "24", label: "Heterogeneous agricultural" },
+      { code: "31", label: "Forests" },
+      { code: "32", label: "Scrub & herbaceous" },
+      { code: "33", label: "Open spaces, little vegetation" },
+      { code: "41", label: "Inland wetlands" },
+      { code: "42", label: "Maritime wetlands" },
+      { code: "51", label: "Inland waters" },
+      { code: "52", label: "Marine waters" },
+    ]
+  },
+  { id: 'lc3', label: 'Level 3 — Detailed classes', level: 3,
+    classes: [
+      { code: "111", label: "Continuous urban fabric" },
+      { code: "112", label: "Discontinuous urban fabric" },
+      { code: "121", label: "Industrial / commercial" },
+      { code: "122", label: "Road & rail networks" },
+      { code: "123", label: "Port areas" },
+      { code: "124", label: "Airports" },
+      { code: "131", label: "Mineral extraction" },
+      { code: "132", label: "Dump sites" },
+      { code: "133", label: "Construction sites" },
+      { code: "141", label: "Green urban areas" },
+      { code: "142", label: "Sport & leisure" },
+      { code: "211", label: "Non-irrigated arable land" },
+      { code: "212", label: "Permanently irrigated land" },
+      { code: "213", label: "Rice fields" },
+      { code: "221", label: "Vineyards" },
+      { code: "222", label: "Fruit trees & berries" },
+      { code: "223", label: "Olive groves" },
+      { code: "231", label: "Pastures" },
+      { code: "241", label: "Annual + permanent crops" },
+      { code: "242", label: "Complex cultivation" },
+      { code: "243", label: "Agriculture + natural veg." },
+      { code: "244", label: "Agro-forestry" },
+      { code: "311", label: "Broad-leaved forest" },
+      { code: "312", label: "Coniferous forest" },
+      { code: "313", label: "Mixed forest" },
+      { code: "321", label: "Natural grasslands" },
+      { code: "322", label: "Moors & heathland" },
+      { code: "323", label: "Sclerophyllous vegetation" },
+      { code: "324", label: "Transitional woodland-shrub" },
+      { code: "331", label: "Beaches, dunes, sands" },
+      { code: "332", label: "Bare rocks" },
+      { code: "333", label: "Sparsely vegetated areas" },
+      { code: "334", label: "Burnt areas" },
+      { code: "335", label: "Glaciers & perpetual snow" },
+      { code: "411", label: "Inland marshes" },
+      { code: "412", label: "Peat bogs" },
+      { code: "421", label: "Salt marshes" },
+      { code: "422", label: "Salines" },
+      { code: "423", label: "Intertidal flats" },
+      { code: "511", label: "Water courses" },
+      { code: "512", label: "Water bodies" },
+      { code: "521", label: "Coastal lagoons" },
+      { code: "522", label: "Estuaries" },
+      { code: "523", label: "Sea & ocean" },
+    ]
+  },
+];
+
+const lcGroupsEl = document.getElementById('lc-groups');
+if (lcGroupsEl) {
+  LC_LEVELS.forEach(levelGroup => {
+    const groupEl = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'lc-level-header';
+    header.innerHTML = `
+      <span class="lc-level-label">${levelGroup.label}</span>
+      <span class="lc-level-chevron">▾</span>
+    `;
+
+    const items = document.createElement('div');
+    items.className = 'lc-level-items collapsed';
+
+    levelGroup.classes.forEach(cls => {
+      const color = CLC_COLORS[cls.code] || '#888888';
+      const btn = document.createElement('button');
+      btn.className = 'lc-class-btn';
+      btn.dataset.code = cls.code;
+      btn.dataset.level = levelGroup.level;
+      btn.innerHTML = `
+        <span class="lc-class-dot" style="background:${color}"></span>
+        <span>${cls.label}</span>
+      `;
+      btn.addEventListener('click', () => selectLCClass(cls.code, levelGroup.level));
+      items.appendChild(btn);
+    });
+
+    header.addEventListener('click', () => {
+      const isOpen = header.classList.contains('open');
+      if (isOpen) {
+        header.classList.remove('open');
+        items.style.maxHeight = items.scrollHeight + 'px';
+        requestAnimationFrame(() => { items.style.maxHeight = '0'; items.classList.add('collapsed'); });
+      } else {
+        header.classList.add('open');
+        items.classList.remove('collapsed');
+        items.style.maxHeight = items.scrollHeight + 'px';
+        setTimeout(() => { items.style.maxHeight = 'none'; }, 250);
+      }
+    });
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(items);
+    lcGroupsEl.appendChild(groupEl);
+  });
+}
+
+map = new maplibregl.Map({
+  container: 'map',
+  style: {
+    version: 8,
+    sources: {
+      'carto-bg': {
+        type: 'raster',
+        tiles: ['https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© CartoDB © OpenStreetMap',
+        maxzoom: 19,
+      },
+      'carto-labels': {
+        type: 'raster',
+        tiles: ['https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        maxzoom: 19,
+      }
+    },
+    layers: [
+      { id: 'carto-bg',     type: 'raster', source: 'carto-bg'     },
+      { id: 'carto-labels', type: 'raster', source: 'carto-labels' },
+    ]
+  },
+  center: [4.3, 50.5],
+  zoom: 7,
+  minZoom: 5,
+  maxZoom: 14,
+});
+window._map = map;
+
+await new Promise(resolve => map.on('load', resolve));
+
+
+// Add initial source + layers for sector level
+addMapLayers('sector');
+
+map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+
+// ── START ─────────────────────────────────────────────────────────────────────
+await selectIndicator('ndvi');
+hideLoading();
+
+// ── MAP LAYER MANAGEMENT ──────────────────────────────────────────────────────
+
+function addMapLayers(level) {
+  const lc = LEVEL_CONFIG[level];
+
+  ['geo-fill', 'geo-border', 'geo-hover', 'geo-selected', 'geo-selected-border'].forEach(id => {
+    if (map.getLayer(id)) map.removeLayer(id);
+  });
+  if (map.getSource('geo')) map.removeSource('geo');
+
+  map.addSource('geo', {
+    type: 'vector',
+    url: `pmtiles://https://pub-1c6ab8c96281402c942ebed10f6fd665.r2.dev/dashboard/data/${lc.pmtiles}.pmtiles`,
+    promoteId: { [lc.sourceLayer]: lc.idProp },
+  });
+
+  map.addLayer({
+    id: 'geo-fill',
+    type: 'fill',
+    source: 'geo',
+    'source-layer': lc.sourceLayer,
+    paint: { 'fill-color': '#1e2530', 'fill-opacity': 0.85 }
+  }, 'carto-labels');
+
+  map.addLayer({
+    id: 'geo-border',
+    type: 'line',
+    source: 'geo',
+    'source-layer': lc.sourceLayer,
+    paint: {
+      'line-color': '#ffffff18',
+      'line-width': level === 'sector' ? 0.3 : level === 'commune' ? 0.5 : 1,
+    }
+  }, 'carto-labels');
+
+  map.addLayer({
+    id: 'geo-hover',
+    type: 'fill',
+    source: 'geo',
+    'source-layer': lc.sourceLayer,
+    paint: {
+      'fill-color': '#ffffff',
+      'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.15, 0],
+    }
+  }, 'carto-labels');
+
+  map.addLayer({
+    id: 'geo-selected',
+    type: 'fill',
+    source: 'geo',
+    'source-layer': lc.sourceLayer,
+    paint: {
+      'fill-color': '#ffffff',
+      'fill-opacity': ['case', ['boolean', ['feature-state', 'selected'], false], 0.15, 0],
+    }
+  }, 'carto-labels');
+
+  map.addLayer({
+    id: 'geo-selected-border',
+    type: 'line',
+    source: 'geo',
+    'source-layer': lc.sourceLayer,
+    paint: {
+      'line-color': '#ffffff',
+      'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 2.5, 0],
+      'line-opacity': ['case', ['boolean', ['feature-state', 'selected'], false], 0.9, 0],
+    }
+  }, 'carto-labels');
+
+  // Hover
+  let hoveredId = null;
+  map.on('mousemove', 'geo-fill', e => {
+    map.getCanvas().style.cursor = 'pointer';
+    if (hoveredId !== null)
+      map.setFeatureState({ source: 'geo', sourceLayer: lc.sourceLayer, id: hoveredId }, { hover: false });
+    hoveredId = e.features[0].id;
+    map.setFeatureState({ source: 'geo', sourceLayer: lc.sourceLayer, id: hoveredId }, { hover: true });
+  });
+
+  map.on('mouseleave', 'geo-fill', () => {
+    map.getCanvas().style.cursor = '';
+    if (hoveredId !== null)
+      map.setFeatureState({ source: 'geo', sourceLayer: lc.sourceLayer, id: hoveredId }, { hover: false });
+    hoveredId = null;
+  });
+
+  // Click
+  let selectedId = null;
+  map.on('click', 'geo-fill', e => {
+    if (selectedId !== null)
+      map.setFeatureState({ source: 'geo', sourceLayer: lc.sourceLayer, id: selectedId }, { selected: false });
+    selectedId = e.features[0].id;
+    map.setFeatureState({ source: 'geo', sourceLayer: lc.sourceLayer, id: selectedId }, { selected: true });
+    const props = e.features[0].properties;
+    const geoId = props[lc.idProp];
+    showDetail(geoId, props, level);
+  });
+}
+// ── LEVEL SWITCHER ────────────────────────────────────────────────────────────
+document.querySelectorAll('.level-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const level = btn.dataset.level;
+    if (level === currentLevel) return;
+
+    document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    currentLevel = level;
+    allData = {};
+
+    addMapLayers(level);
+    if (currentMode === 'landcover' && currentLCClass) {
+      const lvl = parseInt(document.querySelector('.lc-class-btn.active')?.dataset.level || 1);
+      await loadLCPeriod(currentLCClass, lvl, currentPeriodIdx);
+    } else {
+      await loadPeriod(currentIndicator, currentPeriodIdx);
+      preloadAllPeriods(currentIndicator);
+      updateDownloadLinks();
+    }
+  });
+});
+
+// ── FUNCTIONS ─────────────────────────────────────────────────────────────────
+
+async function selectIndicator(ind) {
+  currentMode      = 'eo';
+  currentIndicator = ind;
+  allData = {};
+
+  // Réactiver EO coverage, désactiver LC
+  document.getElementById('coverage-section-eo').style.display   = 'block';
+  document.getElementById('coverage-section-lc').style.display   = 'none';
+  document.getElementById('toggle-imputed').parentElement.style.display = 'flex';
+
+  // Désactiver tous les boutons LC
+  document.querySelectorAll('.lc-class-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.lc-level-header').forEach(h => h.classList.remove('has-active'));
+
+  const cfg = INDICATOR_CONFIG[ind] || {};
+  document.getElementById('status-satellite').textContent   = cfg.satellite   || '—';
+  document.getElementById('status-resolution').textContent  = cfg.resolution  || '—';
+
+  const periods = manifest[ind][currentLevel] || manifest[ind]['sector'] || [];
+  currentPeriodIdx = periods.length - 1;
+
+  const methodBtn = document.getElementById('method-btn');
+  if (methodBtn) methodBtn.href = `/docs/${ind}_methodology_v1.0.pdf`;
+
+  // Mettre à jour les boutons actifs + état des groupes
+  document.querySelectorAll('.indicator-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.ind === ind)
+  );
+  document.querySelectorAll('.group-header').forEach(header => {
+    const groupEl = header.parentElement;
+    const items = groupEl.querySelector('.group-items');
+    const hasActive = groupEl.querySelector(`.indicator-btn[data-ind="${ind}"]`) !== null;
+    header.classList.toggle('has-active', hasActive);
+    // Ouvrir automatiquement le groupe de l'indicateur actif
+    if (hasActive && !header.classList.contains('open')) {
+      header.classList.add('open');
+      items.classList.remove('collapsed');
+      items.style.maxHeight = 'none';
+    }
+  });
+
+  const slider = document.getElementById('period-slider');
+  slider.min = 0;
+  slider.max = periods.length - 1;
+  slider.value = currentPeriodIdx;
+
+  updateLegend(ind);
+  await loadPeriod(ind, currentPeriodIdx);
+  preloadAllPeriods(ind);
+}
+
+async function selectLCClass(code, level) {
+  currentMode    = 'landcover';
+  currentLCClass = code;
+  allData        = {};
+
+  // Désactiver tous les boutons EO, activer le bon LC
+  document.querySelectorAll('.indicator-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.group-header').forEach(h => h.classList.remove('has-active'));
+  document.querySelectorAll('.lc-class-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.code === code)
+  );
+  document.querySelectorAll('.lc-level-header').forEach(h => {
+    const hasActive = h.nextElementSibling?.querySelector(`.lc-class-btn[data-code="${code}"]`);
+    h.classList.toggle('has-active', !!hasActive);
+  });
+
+  // Adapter le slider aux années LC
+  const years = manifestLC?.years || [2018];
+  const yearIdx = years.indexOf(currentLCYear);
+  currentPeriodIdx = yearIdx >= 0 ? yearIdx : years.length - 1;
+  currentLCYear = years[currentPeriodIdx];
+
+  const slider = document.getElementById('period-slider');
+  slider.min   = 0;
+  slider.max   = years.length - 1;
+  slider.value = currentPeriodIdx;
+
+  // Masquer coverage EO, afficher coverage LC
+  document.getElementById('coverage-section-eo').style.display = 'none';
+  document.getElementById('coverage-section-lc').style.display = 'block';
+
+  // Masquer toggle-imputed (pas pertinent pour LC)
+  document.getElementById('toggle-imputed').parentElement.style.display = 'none';
+
+  // Statusbar
+  document.getElementById('status-satellite').textContent  = 'Copernicus Land';
+  document.getElementById('status-resolution').textContent = '100m';
+
+  updateLegendLC(code);
+  await loadLCPeriod(code, level, currentPeriodIdx);
+  requestIdleCallback(() => preloadAllLCYears(code, level));
+}
+
+async function loadLCPeriod(code, level, idx) {
+  if (!manifestLC) return;
+  const years = manifestLC.years || [];
+  if (years.length === 0) return;
+
+  const year = years[idx];
+  currentLCYear = year;
+
+  const url = manifestLC.urls?.[String(year)]?.[currentLevel]?.[code];
+  if (!url) return;
+
+  setLoading(`Loading Land Cover ${year} — class ${code} (${currentLevel})…`);
+
+  document.getElementById('period-display').innerHTML =
+    `${year} <span>CORINE</span>`;
+
+  const resp = await fetch(url);
+  if (!resp.ok) { hideLoading(); return; }
+  const buf        = await resp.arrayBuffer();
+  const wasmTable  = readParquet(new Uint8Array(buf));
+  const arrowTable = arrow.tableFromIPC(wasmTable.intoIPCStream());
+  const rows       = arrowTableToObjects(arrowTable);
+
+  // Filtrer la classe et le niveau demandés
+    currentData = {};
+    rows.forEach(r => {
+      const id = r.sector_id || r.geo_code;
+      currentData[id] = r;
+    });
+
+  // Stocker historique pour série temporelle
+  Object.entries(currentData).forEach(([id, r]) => {
+    if (!allData[id]) allData[id] = [];
+    const existing = allData[id].findIndex(x => x.year === year);
+    const point = { year, pct: r.pct };
+    if (existing >= 0) allData[id][existing] = point;
+    else allData[id].push(point);
+  });
+
+  // Appliquer couleurs LC
+  applyColorsLC(code);
+
+  // Barre de couverture LC
+  const pcts = Object.values(currentData).map(r => r.pct).filter(v => v != null);
+  const avgPct = pcts.length ? (pcts.reduce((a,b) => a+b, 0) / pcts.length).toFixed(1) : '—';
+  document.getElementById('bar-lc').style.width = `${Math.min(avgPct, 100)}%`;
+  document.getElementById('pct-lc').textContent = `${avgPct}%`;
+  document.getElementById('lc-coverage-label').textContent =
+    `Avg. ${code} coverage`;
+
+  document.getElementById('status-sectors').textContent =
+    `${Object.keys(currentData).length} zones · avg ${avgPct}%`;
+
+  updateDownloadLinksLC(year);
+
+  const panelVisible = document.getElementById('detail-panel').classList.contains('visible');
+  const currentGeoId = document.getElementById('detail-sector-id').dataset.geoId;
+  if (panelVisible && currentGeoId && allData[currentGeoId]) {
+    renderTemporalChart(currentGeoId);
+  }
+
+  hideLoading();
+}
+
+function applyColorsLC(code) {
+  const color = CLC_COLORS[code] || '#888888';
+  const lc = LEVEL_CONFIG[currentLevel];
+  const features = map.querySourceFeatures('geo', { sourceLayer: lc.sourceLayer });
+  if (features.length === 0) { setTimeout(() => applyColorsLC(code), 300); return; }
+
+  const expr = ['match', ['get', lc.idProp]];
+  Object.entries(currentData).forEach(([id, row]) => {
+    if (row.pct == null) return;
+    const t = Math.max(0, Math.min(1, row.pct / 100));
+    // Interpoler blanc → couleur CORINE
+    const c = lerpColor('#1e2530', color, t);
+    expr.push(id, c);
+  });
+  expr.push('#1e2530');
+  try { map.setPaintProperty('geo-fill', 'fill-color', expr); } catch(e) {}
+}
+
+function updateLegendLC(code) {
+  const color = CLC_COLORS[code] || '#888888';
+  document.getElementById('legend-gradient').style.background =
+    `linear-gradient(to right, #1e2530, ${color})`;
+  document.getElementById('legend-labels').innerHTML =
+    `<span>0%</span><span>50%</span><span>100%</span>`;
+}
+
+function updateDownloadLinksLC(year) {
+  const url = manifestLC?.urls?.[String(year)]?.[currentLevel]?.[currentLCClass];
+  if (!url) return;
+  const dlList = document.getElementById('dl-list');
+  dlList.innerHTML = '';
+  const a = document.createElement('a');
+  a.className = 'dl-item';
+  a.href = url;
+  a.download = '';
+  a.innerHTML = `
+    <div class="dl-item-left">
+      <span class="dl-icon">📦</span>
+      <div>
+        <div class="dl-label">Parquet — ${currentLevel} · ${year}</div>
+        <div class="dl-desc">All classes, all zones</div>
+      </div>
+    </div>
+    <span class="dl-size">—</span>
+  `;
+  dlList.appendChild(a);
+}
+
+async function loadPeriod(ind, idx) {
+  const periods = manifest[ind][currentLevel] || [];
+  if (periods.length === 0) return;
+
+  const entry = periods[idx];
+  if (!entry) return;
+
+  setLoading(`Loading ${ind.toUpperCase()} ${entry.year}-${String(entry.month).padStart(2,'0')} (${currentLevel})…`);
+
+  const resp = await fetch(entry.url);
+  if (!resp.ok) throw new Error(`404: ${entry.url}`);
+  const buf        = await resp.arrayBuffer();
+  const wasmTable  = readParquet(new Uint8Array(buf));
+  const arrowTable = arrow.tableFromIPC(wasmTable.intoIPCStream());
+  const rows       = arrowTableToObjects(arrowTable);
+
+  currentData = {};
+  rows.forEach(r => { currentData[r.sector_id] = r; });
+  window._currentData = currentData; 
+    console.log('currentData size:', Object.keys(currentData).length);
+    console.log('first key:', Object.keys(currentData)[0]);
+    console.log('lc.idProp:', LEVEL_CONFIG[currentLevel].idProp);
+
+  // Store history
+  rows.forEach(r => {
+    if (!allData[r.sector_id]) allData[r.sector_id] = [];
+    const existing = allData[r.sector_id].findIndex(
+      x => x.year === entry.year && x.month === entry.month
+    );
+    const point = { year: entry.year, month: entry.month, mean: r.mean, flag: r.flag };
+    if (existing >= 0) allData[r.sector_id][existing] = point;
+    else allData[r.sector_id].push(point);
+  });
+
+  const cfg = INDICATOR_CONFIG[ind] || { vmin: 0, vmax: 1, gradient: ['#000','#fff'] };
+  applyColors(cfg);
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('period-display').innerHTML =
+    `${MONTHS[entry.month-1]} <span>${entry.year}</span>`;
+
+  const n    = entry.n || rows.length;
+  const pctM = Math.round((entry.n_measured / n) * 100);
+  const pctI   = Math.round(((entry.n_imputed || 0) / n) * 100);
+  const pctMix = Math.round(((entry.n_mixed   || 0) / n) * 100);
+  const pctX = Math.round((entry.n_missing  / n) * 100);
+    if (currentLevel === 'sector') {
+      setBar('measured', pctM);
+      setBar('imputed',  pctI);
+      setBar('missing',  pctX);
+      document.getElementById('coverage-label-imputed').textContent = 'Imputed';
+      document.getElementById('status-sectors').textContent = `${pctM}% measured · ${pctI}% imputed`;
+    } else {
+      setBar('measured', pctM);
+      setBar('imputed',  pctMix);
+      setBar('missing',  pctX);
+      document.getElementById('coverage-label-imputed').textContent = 'Mixed';
+      document.getElementById('status-sectors').textContent = `${pctM}% measured · ${pctMix}% mixed`;
+    }
+
+  updateDownloadLinks(entry, ind);
+  hideLoading();
+}
+
+function updateDownloadLinks(entry, ind) {
+  ind = ind || currentIndicator;
+  const periods = manifest[ind]?.[currentLevel] || [];
+  if (!entry) entry = periods[currentPeriodIdx];
+  if (!entry) return;
+  const yearMonth = `${entry.year}-${String(entry.month).padStart(2,'0')}`;
+  const level = currentLevel;
+
+  const items = [
+    {
+      icon: '📦',
+      label: `Parquet — ${level} · ${yearMonth}`,
+      desc:  'Current month, all zones',
+      url:   `/exports/${ind}/${level}/${ind}_${level}_${yearMonth}.parquet`,
+    },
+  ];
+
+  const dlList = document.getElementById('dl-list');
+  dlList.innerHTML = '';
+  items.forEach(item => {
+    const a = document.createElement('a');
+    a.className = 'dl-item';
+    a.href = item.url;
+    a.download = '';
+    a.innerHTML = `
+      <div class="dl-item-left">
+        <span class="dl-icon">${item.icon}</span>
+        <div>
+          <div class="dl-label">${item.label}</div>
+          <div class="dl-desc">${item.desc}</div>
+        </div>
+      </div>
+      <span class="dl-size" data-url="${item.url}">—</span>
+    `;
+    dlList.appendChild(a);
+    fetch(item.url, { method: 'HEAD' }).then(r => {
+      if (r.ok) {
+        const size = r.headers.get('content-length');
+        if (size) {
+          const mb = (parseInt(size) / 1e6).toFixed(1);
+          a.querySelector('.dl-size').textContent = `${mb} MB`;
+        }
+      }
+    }).catch(() => {});
+  });
+}
+
+async function preloadAllPeriods(ind) {
+  const periods = manifest[ind][currentLevel] || [];
+  for (let idx = 0; idx < periods.length; idx++) {
+    if (idx === currentPeriodIdx) continue;
+    const entry = periods[idx];
+    try {
+      const resp = await fetch(entry.url);
+      if (!resp.ok) continue;
+      const buf        = await resp.arrayBuffer();
+      const wasmTable  = readParquet(new Uint8Array(buf));
+      const arrowTable = arrow.tableFromIPC(wasmTable.intoIPCStream());
+      const rows       = arrowTableToObjects(arrowTable);
+      rows.forEach(r => {
+        if (!allData[r.sector_id]) allData[r.sector_id] = [];
+        const existing = allData[r.sector_id].findIndex(
+          x => x.year === entry.year && x.month === entry.month
+        );
+        const point = { year: entry.year, month: entry.month, mean: r.mean, flag: r.flag };
+        if (existing >= 0) allData[r.sector_id][existing] = point;
+        else allData[r.sector_id].push(point);
+      });
+
+      // ← Rafraîchir le graphique si un secteur est actuellement affiché
+      const panelVisible = document.getElementById('detail-panel').classList.contains('visible');
+      const currentGeoId = document.getElementById('detail-sector-id').dataset.geoId;
+      if (panelVisible && currentGeoId && allData[currentGeoId]) {
+        renderTemporalChart(currentGeoId);
+      }
+
+    } catch(e) {
+      console.warn(`Preload failed ${entry.year}-${entry.month}:`, e);
+    }
+  }
+}
+
+async function preloadAllLCYears(code, level) {
+  if (!manifestLC) return;
+  const years = manifestLC.years || [];
+  for (const year of years) {
+    if (year === currentLCYear) continue;
+    const url = manifestLC.urls?.[String(year)]?.[currentLevel]?.[code];
+    if (!url) continue;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) continue;
+      const buf        = await resp.arrayBuffer();
+      const wasmTable  = readParquet(new Uint8Array(buf));
+      const arrowTable = arrow.tableFromIPC(wasmTable.intoIPCStream());
+      const rows       = arrowTableToObjects(arrowTable);
+
+      rows.forEach(r => {
+        const id = r.sector_id || r.geo_code;
+        if (!allData[id]) allData[id] = [];
+        const existing = allData[id].findIndex(x => x.year === year);
+        const point = { year, pct: r.pct };
+        if (existing >= 0) allData[id][existing] = point;
+        else allData[id].push(point);
+      });
+
+
+      const panelVisible = document.getElementById('detail-panel').classList.contains('visible');
+      const currentGeoId = document.getElementById('detail-sector-id').dataset.geoId;
+      if (panelVisible && currentGeoId && allData[currentGeoId]) {
+        renderTemporalChart(currentGeoId);
+      }
+    } catch(e) {
+      console.warn(`LC preload failed ${year}:`, e);
+    }
+  }
+}
+
+function arrowTableToObjects(table) {
+  const fields = table.schema.fields.map(f => f.name);
+  const rows   = [];
+  for (let i = 0; i < table.numRows; i++) {
+    const row = {};
+    fields.forEach(name => {
+      const col = table.getChild(name);
+      const val = col ? col.get(i) : null;
+      // Debug pour la première ligne
+      if (i === 0) console.log(`field: ${name}, val: ${val}, type: ${typeof val}, constructor: ${val?.constructor?.name}`);
+      row[name] = val;
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function applyColors(cfg) {
+  const { vmin, vmax, gradient } = cfg;
+
+  const lc       = LEVEL_CONFIG[currentLevel];
+  const features = map.querySourceFeatures('geo', { sourceLayer: lc.sourceLayer });
+  if (features.length === 0) {
+    setTimeout(() => applyColors(cfg), 300);
+    return;
+  }
+
+  const expr = ['match', ['get', lc.idProp]];
+
+  Object.values(currentData).forEach(row => {
+    if (row.mean === null || row.mean === undefined) return;
+    if (!showImputed && (row.flag === 'imputed_temporal' || row.flag === 'mixed')) return;
+    const t     = Math.max(0, Math.min(1, (row.mean - vmin) / (vmax - vmin)));
+    const color = interpolateGradient(gradient, t);
+    expr.push(row.sector_id, color);
+  });
+
+  expr.push('#1e2530');
+
+  try {
+    map.setPaintProperty('geo-fill', 'fill-color', expr);
+  } catch(e) {
+    console.error('setPaintProperty failed:', e);
+  }
+}
+
+function interpolateGradient(colors, t) {
+  const n = colors.length - 1;
+  const i = Math.min(Math.floor(t * n), n - 1);
+  const f = t * n - i;
+  return lerpColor(colors[i], colors[i + 1], f);
+}
+
+function lerpColor(a, b, t) {
+  const ah = parseInt(a.slice(1), 16);
+  const bh = parseInt(b.slice(1), 16);
+  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+  const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+  const r  = Math.round(ar + (br - ar) * t);
+  const g  = Math.round(ag + (bg - ag) * t);
+  const b2 = Math.round(ab + (bb - ab) * t);
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b2.toString(16).padStart(2,'0')}`;
+}
+
+function buildNameHtml(geoId, props, level, row) {
+  if (level === 'sector') {
+    const sec  = props.T_SEC_FR  || props.T_SEC_NL  || geoId;
+    const mun  = props.T_MUN_FR  || props.T_MUN_NL  || '';
+    const prov = props.T_PROVI_FR || props.T_PROVI_NL || '';
+    const area = props.M_AREA_HA ? `${Number(props.M_AREA_HA).toFixed(0)} ha` : '';
+    return `<span style="color:var(--text);font-size:13px;font-weight:500">${sec}</span><br>
+      <span style="color:var(--muted);font-size:10px">${mun} · ${prov} · ${area}</span><br>
+      <span style="font-size:10px;color:var(--muted)">${geoId}</span>`;
+  } else if (level === 'commune') {
+    const name = props.T_MUN_FR  || props.T_MUN_NL  || geoId;
+    const arr  = props.T_ARRD_FR || props.T_ARRD_NL || '';
+    const prov = props.T_PROVI_FR || props.T_PROVI_NL || '';
+    return `<span style="color:var(--text);font-size:13px;font-weight:500">${name}</span><br>
+      <span style="color:var(--muted);font-size:10px">${arr} · ${prov}</span><br>
+      <span style="font-size:10px;color:var(--muted)">${geoId}</span>`;
+  } else if (level === 'arrondissement') {
+    const name = props.T_ARRD_FR || props.T_ARRD_NL || geoId;
+    const prov = props.T_PROVI_FR || props.T_PROVI_NL || '';
+    return `<span style="color:var(--text);font-size:13px;font-weight:500">${name}</span><br>
+      <span style="color:var(--muted);font-size:10px">${prov}</span><br>
+      <span style="font-size:10px;color:var(--muted)">${geoId}</span>`;
+  } else if (level === 'province') {
+    const name = props.T_PROVI_FR || props.T_PROVI_NL || geoId;
+    const reg  = props.T_REGIO_FR || props.T_REGIO_NL || '';
+    return `<span style="color:var(--text);font-size:13px;font-weight:500">${name}</span><br>
+      <span style="color:var(--muted);font-size:10px">${reg}</span><br>
+      <span style="font-size:10px;color:var(--muted)">${geoId}</span>`;
+  } else {
+    const name = row?.label_fr || row?.label_nl || geoId;
+    return `<span style="color:var(--text);font-size:13px;font-weight:500">${name}</span><br>
+      <span style="font-size:10px;color:var(--muted)">${geoId}</span>`;
+  }
+}
+
+function showDetail(geoId, props, level) {
+  document.getElementById('detail-sector-id').dataset.geoId = geoId;
+  const row = currentData[geoId] || (currentMode === 'landcover' ? { pct: 0, pixel_count: 0 } : null);
+  if (!row) return;
+
+  // LC mode — afficher % de la classe
+  if (currentMode === 'landcover') {
+    const cfg = INDICATOR_CONFIG['ndvi']; // juste pour le layout
+    const color = CLC_COLORS[currentLCClass] || '#58a6ff';
+    document.getElementById('detail-value').textContent =
+      row.pct != null ? Number(row.pct).toFixed(1) : 'N/A';
+    document.getElementById('detail-unit').textContent = '%';
+    document.getElementById('detail-median').textContent = '—';
+    document.getElementById('detail-std').textContent = '—';
+    const area = geoAreas?.[level]?.[geoId];
+    document.getElementById('detail-pixels-label').textContent = 'Area (ha)';
+    document.getElementById('detail-pixels').textContent =
+      area != null ? `${area.toFixed(2)} ha` : '—';
+    const flagEl = document.getElementById('detail-flag');
+    flagEl.className = 'flag-badge measured';
+    flagEl.style.background = color + '22';
+    flagEl.style.borderColor = color + '88';
+    flagEl.style.color = color;
+    document.getElementById('detail-flag-text').textContent = `CLC ${currentLCClass}`;
+    // Build name
+    let nameHtml = buildNameHtml(geoId, props, level, row);
+    document.getElementById('detail-sector-id').innerHTML = nameHtml;
+    renderTemporalChart(geoId);
+    document.getElementById('detail-panel').classList.add('visible');
+    return;
+  }
+
+  const cfg = INDICATOR_CONFIG[currentIndicator] || { unit: '', decimals: 2 };
+
+  // Build name depending on level
+  const nameHtml = buildNameHtml(geoId, props, level, row);
+  document.getElementById('detail-sector-id').innerHTML = nameHtml;
+  document.getElementById('detail-value').textContent =
+    row.mean != null ? Number(row.mean).toFixed(cfg.decimals) : 'N/A';
+  document.getElementById('detail-unit').textContent   = cfg.unit;
+  document.getElementById('detail-median').textContent =
+    row.median != null ? Number(row.median).toFixed(cfg.decimals) : '—';
+  document.getElementById('detail-std').textContent =
+    row.std != null ? Number(row.std).toFixed(cfg.decimals) : '—';
+
+  // Adapt stats depending on level
+    const area = geoAreas?.[level]?.[geoId];
+    document.getElementById('detail-pixels-label').textContent = 'Area (ha)';
+    document.getElementById('detail-pixels').textContent =
+      area != null ? `${area.toFixed(2)} ha` : '—';
+
+      const flag   = row.flag || 'measured';
+      const flagEl = document.getElementById('detail-flag');
+      flagEl.className = `flag-badge ${flag}`;
+      document.getElementById('detail-flag-text').textContent = flag.replace(/_/g, ' ');
+
+      renderTemporalChart(geoId);
+      document.getElementById('detail-panel').classList.add('visible');
+    }
+
+function renderTemporalChart(geoId) {
+const history = (allData[geoId] || [])
+  .filter(p => {
+    if (currentMode === 'landcover') return p.pct !== undefined;
+    return p.mean !== undefined;
+  })
+  .sort((a, b) => a.year !== b.year ? a.year - b.year : (a.month || 0) - (b.month || 0));
+
+  if (temporalChart) temporalChart.destroy();
+  const ctx = document.getElementById('temporal-chart').getContext('2d');
+
+  if (currentMode === 'landcover') {    // Mode LC : axe X = années, Y = pourcentage
+    const color = CLC_COLORS[currentLCClass] || '#58a6ff';
+    const labels = history.map(p => String(p.year));
+    const values = history.map(p => p.pct);
+    temporalChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: color,
+          backgroundColor: color + '22',
+          pointBackgroundColor: color,
+          pointBorderColor: color,
+          pointRadius: 5,
+          fill: true,
+          tension: 0.2,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: { label: ctx => ` ${Number(ctx.parsed.y).toFixed(1)}%` },
+            backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+            titleColor: '#7d8590', bodyColor: '#e6edf3',
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#7d8590', font: { size: 9 } }, grid: { color: '#ffffff08' } },
+          y: { ticks: { color: '#7d8590', font: { size: 9 }, callback: v => v + '%' }, grid: { color: '#ffffff08' } },
+        }
+      }
+    });
+  } else {
+    // Mode EO : axe X = mois, Y = valeur indicateur
+    const ML = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+    const labels = history.map(p => `${ML[p.month-1]}'${String(p.year).slice(2)}`);
+    const values = history.map(p => p.mean);
+    const colors = history.map(p =>
+      p.flag === 'imputed_temporal' || p.flag === 'mixed' ? '#d29922' :
+      p.flag === 'missing' ? '#f85149' : '#58a6ff'
+    );
+    temporalChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: '#58a6ff',
+          backgroundColor: '#58a6ff15',
+          pointBackgroundColor: colors,
+          pointBorderColor: colors,
+          pointRadius: 4,
+          fill: true,
+          tension: 0.3,
+          borderWidth: 1.5,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const cfg = INDICATOR_CONFIG[currentIndicator] || { decimals: 2, unit: '' };
+                return ` ${Number(ctx.parsed.y).toFixed(cfg.decimals)} ${cfg.unit}`;
+              }
+            },
+            backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+            titleColor: '#7d8590', bodyColor: '#e6edf3',
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#7d8590', font: { size: 9 } }, grid: { color: '#ffffff08' } },
+          y: { ticks: { color: '#7d8590', font: { size: 9 } }, grid: { color: '#ffffff08' } },
+        }
+      }
+    });
+  } // end EO mode
+}
+
+function updateLegend(ind) {
+  const cfg = INDICATOR_CONFIG[ind] || { gradient: ['#000','#fff'], vmin: 0, vmax: 1 };
+  document.getElementById('legend-gradient').style.background =
+    `linear-gradient(to right, ${cfg.gradient.join(',')})`;
+  const mid = ((cfg.vmin + cfg.vmax) / 2).toFixed(1);
+  document.getElementById('legend-labels').innerHTML =
+    `<span>${cfg.vmin}</span><span>${mid}</span><span>${cfg.vmax}</span>`;
+}
+
+function setBar(type, pct) {
+  document.getElementById(`bar-${type}`).style.width  = `${pct}%`;
+  document.getElementById(`pct-${type}`).textContent  = `${pct}%`;
+}
+
+function setLoading(msg) {
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('loading-text').textContent = msg;
+}
+
+function hideLoading() {
+  document.getElementById('loading').classList.add('hidden');
+}
+
+// ── CONTROLS ──────────────────────────────────────────────────────────────────
+document.getElementById('period-slider').addEventListener('input', async e => {
+  currentPeriodIdx = parseInt(e.target.value);
+  if (currentMode === 'landcover' && currentLCClass) {
+    const level = parseInt(document.querySelector('.lc-class-btn.active')?.dataset.level || 1);
+    await loadLCPeriod(currentLCClass, level, currentPeriodIdx);
+  } else {
+    await loadPeriod(currentIndicator, currentPeriodIdx);
+  }
+});
+
+document.getElementById('prev-btn').addEventListener('click', async () => {
+  if (currentPeriodIdx > 0) {
+    currentPeriodIdx--;
+    document.getElementById('period-slider').value = currentPeriodIdx;
+    if (currentMode === 'landcover' && currentLCClass) {
+      const level = parseInt(document.querySelector('.lc-class-btn.active')?.dataset.level || 1);
+      await loadLCPeriod(currentLCClass, level, currentPeriodIdx);
+    } else {
+      await loadPeriod(currentIndicator, currentPeriodIdx);
+    }
+  }
+});
+
+document.getElementById('next-btn').addEventListener('click', async () => {
+  if (currentMode === 'landcover' && currentLCClass) {
+    const years = manifestLC?.years || [];
+    if (currentPeriodIdx < years.length - 1) {
+      currentPeriodIdx++;
+      document.getElementById('period-slider').value = currentPeriodIdx;
+      const level = parseInt(document.querySelector('.lc-class-btn.active')?.dataset.level || 1);
+      await loadLCPeriod(currentLCClass, level, currentPeriodIdx);
+    }
+  } else {
+    const periods = manifest[currentIndicator][currentLevel] || [];
+    const max = periods.length - 1;
+    if (currentPeriodIdx < max) {
+      currentPeriodIdx++;
+      document.getElementById('period-slider').value = currentPeriodIdx;
+      await loadPeriod(currentIndicator, currentPeriodIdx);
+    }
+  }
+});
+
+document.getElementById('close-detail').addEventListener('click', () => {
+  document.getElementById('detail-panel').classList.remove('visible');
+});
+
+document.getElementById('toggle-imputed').addEventListener('click', async function() {
+  showImputed = !showImputed;
+  this.classList.toggle('on', showImputed);
+  applyColors(INDICATOR_CONFIG[currentIndicator] || { vmin: 0, vmax: 1, gradient: ['#000','#fff'] });
+});
+
+document.getElementById('toggle-labels').addEventListener('click', function() {
+  this.classList.toggle('on');
+  map.setPaintProperty('carto-labels', 'raster-opacity', this.classList.contains('on') ? 1 : 0);
+});
+
+document.getElementById('toggle-transparency').addEventListener('click', function() {
+  this.classList.toggle('on');
+  map.setPaintProperty('geo-fill', 'fill-opacity', this.classList.contains('on') ? 0.85 : 0.35);
+});
+
+
+
+
+</script>
+</body>
+</html>
