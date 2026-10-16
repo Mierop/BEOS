@@ -1001,14 +1001,14 @@ map = new maplibregl.Map({
     sources: {
       'carto-bg': {
         type: 'raster',
-        tiles: ['https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png'],
+        tiles: ['https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png'],
         tileSize: 256,
-        attribution: '© CartoDB © OpenStreetMap',
+        attribution: '© Stadia Maps © OpenMapTiles © OpenStreetMap',
         maxzoom: 19,
       },
       'carto-labels': {
         type: 'raster',
-        tiles: ['https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png'],
+        tiles: ['https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png'],
         tileSize: 256,
         maxzoom: 19,
       }
